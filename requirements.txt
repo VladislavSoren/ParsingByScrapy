@@ -1,0 +1,4 @@
+Scrapy==2.10.1
+black==23.9.0
+flake8==6.1.0
+pre-commit==3.4.0
