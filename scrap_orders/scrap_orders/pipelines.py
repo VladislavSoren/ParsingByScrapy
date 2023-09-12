@@ -8,6 +8,8 @@
 # from itemadapter import ItemAdapter
 
 
-class ScrapOrdersPipeline:
+class GoodPipeline:
     def process_item(self, item, spider):
+        # adapter = ItemAdapter(item)
+
         return item

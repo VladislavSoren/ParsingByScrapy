@@ -1,8 +1,8 @@
-# from pathlib import Path
+# from ..items import GoodItem
+from collections import OrderedDict
 
+import pandas as pd
 import scrapy
-
-# from bs4 import BeautifulSoup
 
 
 class QuotesSpider(scrapy.Spider):
@@ -12,84 +12,117 @@ class QuotesSpider(scrapy.Spider):
         "Краски для наружных работ",
         "Лаки",
     }
-    target_categories_urls = {}
-
-    def start_requests(self):
-        BASE_URL = [
-            "https://order-nn.ru/kmo/catalog/",
-        ]
-        for url in BASE_URL:
-            yield scrapy.Request(url=url, callback=self.parse)
+    target_categories_urls = OrderedDict()
+    goods_category_urls = []
+    max_page_num = 0
+    current_page_index = 0
+    category_path_gen = None
+    START_URL = "https://order-nn.ru/kmo/catalog"
+    BASE_URL = "https://order-nn.ru"
 
     @staticmethod
-    def normalise_str(value):
-        value = value.strip().lower()
-        return value
+    def first_element_iter_obj(s):
+        return next(iter(s))
 
-    def parse(self, response):
+    def start_requests(self):
+        yield scrapy.Request(url=self.START_URL, callback=self.pars_target_categories_urls)
+
+    # receiving categories urls
+    def pars_target_categories_urls(self, response):
+        # form categories urls dict
         for quote in response.xpath("//div[contains(@class,'col-md-11 col-sm-11 col-xs-11')]/div/div/a"):
             if not self.target_categories:
                 break
 
-            category_name = quote.css("a::text").get()  # quote.xpath('./text()').get()
+            category_name = quote.xpath("./text()").get()
 
             if category_name in self.target_categories:
-                self.target_categories_urls[category_name] = quote.css("a::attr(href)").get()  # quote.attrib['href']
+                self.target_categories_urls[category_name] = quote.attrib["href"]
                 self.target_categories.remove(category_name)
 
-        yield self.target_categories
+        # trigger scrab
+        # start_url = self.first_element_iter_obj(self.target_categories_urls)
+        self.category_path_gen = iter(self.target_categories_urls.items())
+        category, url_path_rel = next(self.category_path_gen)
+        category_url_abs = self.BASE_URL + url_path_rel
 
+        yield scrapy.Request(category_url_abs, callback=self.parse_goods_category_urls_list)
 
-# /html/body/div[6]/div[1]/div/div/div/div[1]/div[1]/div[2]
-# /html/body/div[6]/div[1]/div/div/div/div[1]/div[1]/div[2]
+    # parsing urls goods with pagination
+    def parse_goods_category_urls_list(self, response):
+        # usefull work (scrab index page)
 
+        # find max page number
+        page_urls = response.xpath(
+            "//div[@class='top-control']/div/ul[@class='ul-pagination']/li/a[@rel='canonical']/@href"
+        ).getall()
+        self.max_page_num = int(max(page_urls)[-1])
 
-# sel = Selector(text='Лакокрасочные материалы')
-# sel.css("div.col-md-11 col-sm-11 col-xs-11").get()
+        self.goods_category_urls += response.xpath("//a[@itemprop='url']/@href").getall()
 
-# response.css("div.col-md-11 col-sm-11 col-xs-11").get()
+        page_url_pagen_base = page_urls[0][:-1]  # '/kmo/catalog/5974/?PAGEN_1='
+        self.current_page_index = 2
+        next_page_url_rel = page_url_pagen_base + str(self.current_page_index)  # .../kmo/catalog/5974/?PAGEN_1=2
+        next_page_url_abs = self.BASE_URL + next_page_url_rel
 
-# response.xpath("//div[contains(@class,'col-md-11 col-sm-11 col-xs-11')]").extract()
+        yield scrapy.Request(next_page_url_abs, callback=self.parse_goods_for_one)
 
-# response.xpath("//div[contains(@class,'col-md-11 col-sm-11 col-xs-11')]/div[0]")
+    def parse_goods_for_one(self, response):
+        # receiving goods links from current page
+        self.goods_category_urls += response.xpath("//a[@itemprop='url']/@href").getall()
+
+        # increment page number
+        self.current_page_index += 1
+        next_page_url_abs = response.url[:-1] + str(self.current_page_index)
+
+        # condition of exit
+        if self.current_page_index > self.max_page_num:
+            try:
+                category, url_path_rel = next(self.category_path_gen)
+                category_url_abs = self.BASE_URL + url_path_rel
+                yield scrapy.Request(category_url_abs, callback=self.parse_goods_category_urls_list)
+            except StopIteration:
+                data = pd.DataFrame({"goods_urls": self.goods_category_urls})
+                path = "goods_urls.csv"
+                data.to_csv(path, index=False)
+
+        else:
+            try:  # why its doesnt work?! when page doesnt exist, no proc redirect?
+                yield scrapy.Request(
+                    next_page_url_abs,
+                    meta={
+                        "dont_redirect": True,
+                    },
+                    callback=self.parse_goods_for_one,
+                )
+            except Exception as e:
+                print(e)
 
 
 """
-col-md-4 col-sm-4 col-xs-4
-response.xpath("//div[contains(@class,'col-md-4 col-sm-4 col-xs-4')]")
+next_page_url_rel = response.xpath(
+    "//div[@class='top-control']/div/ul[@class='ul-pagination']/li/a[@rel='canonical']/@href")[-1].get()
+next_page_url_abs = self.BASE_URL + next_page_url_rel
 
-response.xpath("//div[contains(@class,'col-md-4 col-sm-4 col-xs-4')]")[0]
-/html/body/div[6]/div[1]/div/div/div/div[1]/div[1]
-/html/body/div[6]/div[1]/div/div/div/div[1]/div[1]/div[1]
+response.xpath("//div[@class='top-control']/div/ul[@class='ul-pagination']/li/a[@rel='canonical']/@href")[-1].get()
 
-# next block
-response.xpath("//div[contains(@class,'col-md-4 col-sm-4 col-xs-4')]")[1]
-/html/body/div[6]/div[1]/div/div/div/div[1]/div[2]
+response.xpath("//ul[@class='ul-pagination']/li/a[@rel='canonical']/@href")[-1].get()
 
-response.xpath("//div[contains(@class,'col-md-4 col-sm-4 col-xs-4')]/div[1]")
+//ul[@class='ul-pagination']
 
+response.xpath("//a[@itemprop='url']")
 
+//a[@itemprop="url"] -> contains all goods urls from page
 
-1. Detect index of block
-response.xpath("//div[contains(@class,'col-md-11 col-sm-11 col-xs-11')]/div/h2/a/text()") ->
-all selects with big content blocks names (Лакокрасочные материалы: ..., Инструмент...)
-2. Find index block with match
-2. Build target block path by index
-target_block_select = response.xpath("//div[contains(@class,'col-md-11 col-sm-11 col-xs-11')]")[0]
-                    /html/body/div[6]/div[1]/div/div/div/div[1]/div[1]/div[2]
-                    /html/body/div[6]/div[1]/div/div/div/div[1]/div[1]/div[2]/div[2]/div/a - target
-3. Find inner block with goods
-target_block_select.xpath("/div/a")
+//div[@class="horizontal-product-item"] > to all good block
 
-# proper path
-/html/body/div[6]/div[1]/div/div/div/div[1]/div[1]/div[2]/div[2]/div/a
+/html/body/div[6]/div/div/div[2]/div[2]/div/div[4]/div[1]/div[2]/div[3]/div[2]/a
 
-/html/body/div[6]/div[1]/div/div/div/div[1]/div[1]
-/html/body/div[6]/div[1]/div/div/div/div[1]/div[2]
+наименование
+цена
+описание
+характеристики* в виде JSON.
 
-/html/body/div[6]/div[1]/div/div/div/div[1]/div[1]/div[2]
-
->>> response.xpath("//div[contains(@class,'col-md-11 col-sm-11 col-xs-11')]/div[1]")
-
-
+/html/body/div[6]/div/div/div[2]/div[2]/div/div[4]/div[1]
+/html/body/div[6]/div/div/div[2]/div[2]/div/div[6]/div/div/div[3]
 """

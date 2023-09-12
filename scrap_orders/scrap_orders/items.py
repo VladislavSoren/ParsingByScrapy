@@ -6,7 +6,9 @@
 import scrapy
 
 
-class ScrapOrdersItem(scrapy.Item):
+class GoodItem(scrapy.Item):
     # define the fields for your item here like:
     # name = scrapy.Field()
-    pass
+    category1 = scrapy.Field()
+    category2 = scrapy.Field()
+    category3 = scrapy.Field()

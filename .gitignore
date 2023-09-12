@@ -139,4 +139,10 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# custom
 sup_script.py
+*.csv
+*.json
+*.jsonl
+*.html
