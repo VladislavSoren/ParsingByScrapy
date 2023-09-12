@@ -1,8 +1,27 @@
-# from ..items import GoodItem
+"""
+наименование
+цена
+описание
+характеристики* в виде JSON.
+"""
+import logging
+import sys
 from collections import OrderedDict
 
 import pandas as pd
 import scrapy
+
+# from ..items import GoodItem
+
+# Параметры логирования
+logging.basicConfig(
+    filemode="w",
+    format="[%(asctime)s] %(levelname).1s %(message)s",
+    datefmt="%Y.%m.%d%H:%M:%S",
+    level=logging.INFO,
+)
+parsing_logger = logging.getLogger(__name__)
+logging.info("start")
 
 
 class QuotesSpider(scrapy.Spider):
@@ -19,10 +38,6 @@ class QuotesSpider(scrapy.Spider):
     category_path_gen = None
     START_URL = "https://order-nn.ru/kmo/catalog"
     BASE_URL = "https://order-nn.ru"
-
-    @staticmethod
-    def first_element_iter_obj(s):
-        return next(iter(s))
 
     def start_requests(self):
         yield scrapy.Request(url=self.START_URL, callback=self.pars_target_categories_urls)
@@ -41,7 +56,6 @@ class QuotesSpider(scrapy.Spider):
                 self.target_categories.remove(category_name)
 
         # trigger scrab
-        # start_url = self.first_element_iter_obj(self.target_categories_urls)
         self.category_path_gen = iter(self.target_categories_urls.items())
         category, url_path_rel = next(self.category_path_gen)
         category_url_abs = self.BASE_URL + url_path_rel
@@ -50,8 +64,6 @@ class QuotesSpider(scrapy.Spider):
 
     # parsing urls goods with pagination
     def parse_goods_category_urls_list(self, response):
-        # usefull work (scrab index page)
-
         # find max page number
         page_urls = response.xpath(
             "//div[@class='top-control']/div/ul[@class='ul-pagination']/li/a[@rel='canonical']/@href"
@@ -83,7 +95,7 @@ class QuotesSpider(scrapy.Spider):
                 yield scrapy.Request(category_url_abs, callback=self.parse_goods_category_urls_list)
             except StopIteration:
                 data = pd.DataFrame({"goods_urls": self.goods_category_urls})
-                path = "goods_urls.csv"
+                path = "scrap_orders/spiders/goods_urls.csv"
                 data.to_csv(path, index=False)
 
         else:
@@ -99,30 +111,60 @@ class QuotesSpider(scrapy.Spider):
                 print(e)
 
 
-"""
-next_page_url_rel = response.xpath(
-    "//div[@class='top-control']/div/ul[@class='ul-pagination']/li/a[@rel='canonical']/@href")[-1].get()
-next_page_url_abs = self.BASE_URL + next_page_url_rel
+class GoodsSpider(scrapy.Spider):
+    name = "goods"
+    target_categories = {
+        "Краски и материалы специального назначения",
+        "Краски для наружных работ",
+        "Лаки",
+    }
+    target_categories_urls = pd.read_csv("goods_urls.csv")
+    BASE_URL = "https://order-nn.ru"
+    SAVE_PATH = "goods.csv"
+    good_index = 0
+    START_URL = BASE_URL + target_categories_urls.values[good_index][0]  # https://order-nn.ru/kmo/catalog/5992/535730'
 
-response.xpath("//div[@class='top-control']/div/ul[@class='ul-pagination']/li/a[@rel='canonical']/@href")[-1].get()
+    def start_requests(self):
+        # creating start table
+        good_info = {}
 
-response.xpath("//ul[@class='ul-pagination']/li/a[@rel='canonical']/@href")[-1].get()
+        good_info["name"] = []
+        good_info["price"] = []
+        good_info["descr"] = []
+        good_info["characteristics"] = []
 
-//ul[@class='ul-pagination']
+        df_new = pd.DataFrame(good_info)
+        df_new.to_csv(self.SAVE_PATH, index=False, header=True)
 
-response.xpath("//a[@itemprop='url']")
+        yield scrapy.Request(url=self.START_URL, callback=self.pars_goods)
 
-//a[@itemprop="url"] -> contains all goods urls from page
+    # receiving categories urls
+    def pars_goods(self, response):
+        print("___Start pars_goods")
 
-//div[@class="horizontal-product-item"] > to all good block
+        # good_info = GoodItem()
+        good_info = {}
+        good_info["name"] = [response.xpath("//h1[@itemprop='name']/text()").get()]
+        good_info["price"] = [response.xpath("//span[@class='element-current-price-number']/text()").get()]
+        good_info["descr"] = [response.xpath("//div[@id='for_parse']/p/text()").get()]
+        good_info["characteristics"] = ["empty"]
 
-/html/body/div[6]/div/div/div[2]/div[2]/div/div[4]/div[1]/div[2]/div[3]/div[2]/a
+        # check item
+        # yield good_info
 
-наименование
-цена
-описание
-характеристики* в виде JSON.
+        # save info
+        df_new = pd.DataFrame(good_info)
+        df_new.to_csv(self.SAVE_PATH, mode="a", index=False, header=False)
 
-/html/body/div[6]/div/div/div[2]/div[2]/div/div[4]/div[1]
-/html/body/div[6]/div/div/div[2]/div[2]/div/div[6]/div/div/div[3]
-"""
+        # increment good_index
+        self.good_index += 1
+        print(self.good_index)
+
+        # if we fall out our frame -> stop program
+        try:
+            next_url = self.BASE_URL + self.target_categories_urls.values[self.good_index][0]
+        except IndexError:
+            sys.exit()
+
+        # to the next good
+        yield scrapy.Request(url=next_url, callback=self.pars_goods)
