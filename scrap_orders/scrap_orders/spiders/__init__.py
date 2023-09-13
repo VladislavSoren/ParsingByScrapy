@@ -2,3 +2,5 @@
 #
 # Please refer to the documentation for information on how to create and manage
 # your spiders.
+from .goods_spider import GoodsSpider
+from .quotes_spider import GoodUrlsSpider
